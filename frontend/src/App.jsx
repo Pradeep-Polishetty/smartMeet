@@ -82,7 +82,7 @@ function Status({ status }) {
   );
 }
 
-function Preview({ preview, previewText, setPreviewText, refinementPrompt, setRefinementPrompt, onRefine, refineLoading }) {
+function Preview({ preview, previewText, setPreviewText, refinementPrompt, setRefinementPrompt, onRefine, refineLoading, isSpeaking, speechPaused, onSpeak, onPause, onResume, onStop, speechSpeed, onSpeedChange }) {
   const [editMode, setEditMode] = useState(false);
 
   if (!preview) return null;
@@ -115,6 +115,50 @@ function Preview({ preview, previewText, setPreviewText, refinementPrompt, setRe
           dangerouslySetInnerHTML={{ __html: htmlContent }}
         />
       )}
+
+      <div className="speech-controls">
+        <div className="speech-buttons">
+          <button
+            className={`btn btn-speech ${isSpeaking ? "speaking" : ""}`}
+            onClick={isSpeaking ? onStop : onSpeak}
+            title={isSpeaking ? "Stop speaking" : "Read aloud"}
+          >
+            {isSpeaking ? "⏹️ Stop" : "🔊 Speak"}
+          </button>
+          {isSpeaking && !speechPaused && (
+            <button
+              className="btn btn-speech-secondary"
+              onClick={onPause}
+              title="Pause speech"
+            >
+              ⏸️ Pause
+            </button>
+          )}
+          {isSpeaking && speechPaused && (
+            <button
+              className="btn btn-speech-secondary"
+              onClick={onResume}
+              title="Resume speech"
+            >
+              ▶️ Resume
+            </button>
+          )}
+        </div>
+        <div className="speed-control">
+          <label htmlFor="speech-speed">Speed: </label>
+          <input
+            id="speech-speed"
+            type="range"
+            min="0.5"
+            max="2"
+            step="0.1"
+            value={speechSpeed}
+            onChange={(e) => onSpeedChange(parseFloat(e.target.value))}
+            disabled={isSpeaking}
+          />
+          <span className="speed-value">{speechSpeed.toFixed(1)}x</span>
+        </div>
+      </div>
 
       <div className="refinement-row">
         <textarea
@@ -218,6 +262,12 @@ export default function App() {
   const [showSavedDocuments, setShowSavedDocuments] = useState(false);
   const [selectedDocumentId, setSelectedDocumentId] = useState(null);
   const [savedDocument, setSavedDocument] = useState(null);
+
+  // ── Text-to-Speech ──────────────────────────────────
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speechPaused, setSpeechPaused] = useState(false);
+  const [speechSpeed, setSpeechSpeed] = useState(1);
+  const speechUtteranceRef = useRef(null);
 
   const codeDocRef = useRef(null);
 
@@ -481,6 +531,64 @@ export default function App() {
     }
   };
 
+  // ── Text-to-Speech Functions ────────────────────────
+  const handleSpeak = () => {
+    if (!previewText.trim()) {
+      alert("No documentation to read. Generate documentation first.");
+      return;
+    }
+
+    // Stop previous speech if any
+    if (isSpeaking) {
+      handleStopSpeech();
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(previewText);
+    utterance.rate = speechSpeed;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+
+    utterance.onstart = () => {
+      setIsSpeaking(true);
+      setSpeechPaused(false);
+    };
+
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      setSpeechPaused(false);
+    };
+
+    utterance.onerror = (error) => {
+      console.error("Speech error:", error);
+      setIsSpeaking(false);
+      alert("Speech synthesis error: " + error.error);
+    };
+
+    speechUtteranceRef.current = utterance;
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const handlePauseSpeech = () => {
+    if (isSpeaking) {
+      window.speechSynthesis.pause();
+      setSpeechPaused(true);
+    }
+  };
+
+  const handleResumeSpeech = () => {
+    if (speechPaused) {
+      window.speechSynthesis.resume();
+      setSpeechPaused(false);
+    }
+  };
+
+  const handleStopSpeech = () => {
+    window.speechSynthesis.cancel();
+    setIsSpeaking(false);
+    setSpeechPaused(false);
+  };
+
   /* ── render ── */
   if (showLandingPage) {
     return <LandingPage onStart={() => setShowLandingPage(false)} />;
@@ -632,6 +740,14 @@ export default function App() {
           setRefinementPrompt={setRefinementPrompt}
           onRefine={refineDoc}
           refineLoading={refineLoading}
+          isSpeaking={isSpeaking}
+          speechPaused={speechPaused}
+          onSpeak={handleSpeak}
+          onPause={handlePauseSpeech}
+          onResume={handleResumeSpeech}
+          onStop={handleStopSpeech}
+          speechSpeed={speechSpeed}
+          onSpeedChange={setSpeechSpeed}
         />
 
         {preview && (
