@@ -76,16 +76,48 @@ export function Status({ status }) {
   );
 }
 
-export function Preview({ preview }) {
+export function Preview({ preview, previewText, setPreviewText, refinementPrompt, setRefinementPrompt, onRefine, refineLoading }) {
   if (!preview) return null;
+  
   const htmlContent = marked(preview);
+  
   return (
     <div className="comp-box preview-output" style={{ marginTop: "20px" }}>
-      <div className="comp-label">Generated Documentation Preview</div>
-      <div
-        className="rendered-markdown"
-        dangerouslySetInnerHTML={{ __html: htmlContent }}
+      <div className="comp-label">Generated Documentation - Edit & Refine</div>
+      
+      <textarea
+        className="mono-textarea code-textarea"
+        value={previewText || preview}
+        rows={12}
+        onChange={(e) => setPreviewText && setPreviewText(e.target.value)}
+        placeholder="Edit your documentation here..."
       />
+      
+      <div className="preview-refinement" style={{ marginTop: "15px" }}>
+        <textarea
+          className="mono-textarea"
+          value={refinementPrompt}
+          rows={3}
+          onChange={(e) => setRefinementPrompt && setRefinementPrompt(e.target.value)}
+          placeholder="Add refinement instructions for Gemini (optional)..."
+        />
+        <button 
+          className="btn btn-primary" 
+          onClick={onRefine}
+          disabled={refineLoading}
+          style={{ marginTop: "10px" }}
+        >
+          {refineLoading ? <><span className="spinner" /> Refining…</> : "✨ Refine with Gemini"}
+        </button>
+      </div>
+      
+      <div className="preview-render" style={{ marginTop: "30px", padding: "20px", border: "1px solid #2a2a3e", borderRadius: "8px", backgroundColor: "#0f0f1a" }}>
+        <div className="comp-label">Live Preview</div>
+        <div
+          className="rendered-markdown"
+          dangerouslySetInnerHTML={{ __html: htmlContent }}
+        />
+      </div>
     </div>
   );
 }

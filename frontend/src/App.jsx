@@ -39,6 +39,12 @@ export default function App() {
   const [showOverlapModal, setShowOverlapModal] = useState(false);
   const [overlapLoading, setOverlapLoading] = useState(false);
 
+  // ── Documentation refinement ────────────────────────────
+
+  const [previewText, setPreviewText] = useState("");
+  const [refinementPrompt, setRefinementPrompt] = useState("");
+  const [refineLoading, setRefineLoading] = useState(false);
+
   const codeDocRef = useRef(null);
 
   // ────────────────────────────────────────────────────────
@@ -135,11 +141,47 @@ export default function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setPreview(data.result);
+      setPreviewText(data.result);
+      setPreviewEditMode(false);
       setStatus({ type: "success", message: "✅ Documentation generated!" });
     } catch (err) {
       setStatus({ type: "error", message: "❌ " + err.message });
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ────────────────────────────────────────────────────────
+  // 4.5. Refine documentation with Gemini
+  // ────────────────────────────────────────────────────────
+  const refineDoc = async () => {
+    if (!previewText) { alert("No documentation to refine"); return; }
+    
+    setRefineLoading(true);
+    setStatus({ type: "loading", message: "⏳ Refining documentation with Gemini…" });
+
+    try {
+      const res = await fetch(`${API}/refine-doc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          markdown: previewText, 
+          refinement: refinementPrompt,
+          code,
+          style,
+          title
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setPreview(data.result);
+      setPreviewText(data.result);
+      setRefinementPrompt("");
+      setStatus({ type: "success", message: "✨ Documentation refined!" });
+    } catch (err) {
+      setStatus({ type: "error", message: "❌ " + err.message });
+    } finally {
+      setRefineLoading(false);
     }
   };
 
@@ -343,7 +385,15 @@ export default function App() {
         <PromptBox prompt={prompt} setPrompt={setPrompt} />
         <GenerateButton loading={loading} generateDoc={generateDoc} />
         <Status status={status} />
-        <Preview preview={preview} />
+        <Preview 
+          preview={preview} 
+          previewText={previewText}
+          setPreviewText={setPreviewText}
+          refinementPrompt={refinementPrompt}
+          setRefinementPrompt={setRefinementPrompt}
+          onRefine={refineDoc}
+          refineLoading={refineLoading}
+        />
 
         {preview && (
           <div className="download-row">

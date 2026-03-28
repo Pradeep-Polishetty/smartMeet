@@ -133,27 +133,67 @@ app.post("/generate-doc", async (req, res) => {
   if (!code) return res.status(400).json({ error: "No code provided" });
 
   try {
-    const userPrompt = prompt || "Generate comprehensive HTML documentation";
+    const userPrompt = prompt || "Create clear, concise documentation";
     const result = await callGemini(
-      `You are a professional code documentation expert.
-Generate ${style || "technical"} documentation for the following HTML code in markdown format.
+      `Generate ${style || "technical"} documentation in markdown format.
 
 Title: ${title || "HTML Documentation"}
-Custom Instructions: ${userPrompt}
+Instructions: ${userPrompt}
 
 HTML Code:
 \`\`\`html
 ${code}
 \`\`\`
 
-Provide structured markdown with sections: Overview, Structure, Components, Features, and Usage.
-Use proper markdown: # for h1, ## for h2, - for bullets, **bold** for emphasis.`
+Return ONLY clean markdown with:
+- Brief overview (1-2 sentences)
+- Key sections with ## headings
+- Key points with - bullets
+Use **bold** for important terms. No extra sections or preamble.`
     );
 
     res.json({ result });
   } catch (err) {
     console.error("Doc Gen Error:", err.response?.data || err.message);
     res.status(500).json({ error: err.response?.data?.error?.message || "Documentation generation failed" });
+  }
+});
+
+// ──────────────────────────────────────────────────────────
+// 3.5. REFINE DOCUMENTATION
+// ──────────────────────────────────────────────────────────
+app.post("/refine-doc", async (req, res) => {
+  const { markdown, refinement, code, style, title } = req.body;
+  if (!markdown) return res.status(400).json({ error: "No documentation provided" });
+
+  try {
+    const refinePrompt = refinement || "Improve clarity and structure";
+    const result = await callGemini(
+      `Refine the following markdown documentation based on the feedback.
+
+Current Documentation:
+\`\`\`markdown
+${markdown}
+\`\`\`
+
+Refinement Instructions: ${refinePrompt}
+
+HTML Context (if needed):
+\`\`\`html
+${code || ""}
+\`\`\`
+
+Return ONLY the refined markdown. Keep the same format:
+- Brief overview
+- Key sections with ## headings
+- Key points with - bullets
+Use **bold** for important terms. No extra sections or preamble.`
+    );
+
+    res.json({ result });
+  } catch (err) {
+    console.error("Refinement Error:", err.response?.data || err.message);
+    res.status(500).json({ error: err.response?.data?.error?.message || "Refinement failed" });
   }
 });
 
