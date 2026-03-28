@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CodeDoc — AI Doc Generator</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --surface2: #18181f;
+    --border: #2a2a38;
+    --accent: #6c63ff;
+    --accent2: #ff6584;
+    --text: #e8e8f0;
+    --muted: #6b6b80;
+    --green: #4fffb0;
+    --mono: 'Space Mono', monospace;
+    --sans: 'Syne', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0 1rem 4rem;
+    overflow-x: hidden;
+  }
+
+  /* Grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(108,99,255,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(108,99,255,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  header {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    padding: 3.5rem 1rem 2rem;
+  }
+
+  .badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 4px 12px;
+    border-radius: 2px;
+    margin-bottom: 1.2rem;
+    text-transform: uppercase;
+  }
+
+  h1 {
+    font-size: clamp(2.4rem, 6vw, 4rem);
+    font-weight: 800;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    background: linear-gradient(135deg, #fff 30%, var(--accent) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 0.7rem;
+  }
+
+  .subtitle {
+    color: var(--muted);
+    font-size: 1rem;
+    font-weight: 400;
+    font-family: var(--mono);
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 860px;
+  }
+
+  /* Panel */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 1.2rem;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1.2rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+  }
+
+  .panel-title {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .dot-row { display: flex; gap: 6px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .dot:nth-child(1) { background: #ff5f56; }
+  .dot:nth-child(2) { background: #ffbd2e; }
+  .dot:nth-child(3) { background: #27c93f; }
+
+  textarea {
+    width: 100%;
+    min-height: 220px;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--green);
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    line-height: 1.7;
+    padding: 1.2rem;
+    resize: vertical;
+    caret-color: var(--accent);
+  }
+
+  textarea::placeholder { color: #333344; }
+
+  /* Options row */
+  .options-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1.2rem;
+  }
+
+  .field {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+  }
+
+  .field label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 0.6rem;
+  }
+
+  .field input, .field select {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    padding: 0.55rem 0.8rem;
+    border-radius: 6px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .field input:focus, .field select:focus { border-color: var(--accent); }
+  .field select option { background: var(--surface2); }
+
+  /* Prompt field */
+  .prompt-field {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1.2rem;
+  }
+
+  .prompt-field label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 0.6rem;
+  }
+
+  .prompt-field textarea {
+    min-height: 70px;
+    font-size: 0.82rem;
+    color: var(--text);
+    border-top: none;
+    padding: 0.55rem 0.8rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    transition: border-color 0.2s;
+  }
+  .prompt-field textarea:focus { border-color: var(--accent); outline: none; }
+
+  /* Generate button */
+  .btn {
+    width: 100%;
+    padding: 1rem 2rem;
+    font-family: var(--sans);
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: #fff;
+    background: linear-gradient(135deg, var(--accent), #9b8aff);
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.15s, box-shadow 0.2s;
+    box-shadow: 0 0 0 0 rgba(108,99,255,0);
+  }
+
+  .btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(108,99,255,0.4);
+  }
+
+  .btn:active:not(:disabled) { transform: translateY(0); }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Status area */
+  #status {
+    margin-top: 1.2rem;
+    padding: 1rem 1.2rem;
+    border-radius: 10px;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    display: none;
+    line-height: 1.6;
+  }
+
+  #status.loading {
+    display: block;
+    background: rgba(108,99,255,0.08);
+    border: 1px solid rgba(108,99,255,0.3);
+    color: var(--accent);
+  }
+
+  #status.error {
+    display: block;
+    background: rgba(255,101,132,0.08);
+    border: 1px solid rgba(255,101,132,0.3);
+    color: var(--accent2);
+  }
+
+  #status.success {
+    display: block;
+    background: rgba(79,255,176,0.06);
+    border: 1px solid rgba(79,255,176,0.3);
+    color: var(--green);
+  }
+
+  /* Spinner */
+  .spinner {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    margin-right: 8px;
+    vertical-align: middle;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Result preview */
+  #preview {
+    display: none;
+    margin-top: 1.2rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  #preview .panel-header { cursor: default; }
+
+  #preview-content {
+    padding: 1.5rem;
+    font-size: 0.9rem;
+    line-height: 1.8;
+    color: var(--text);
+    white-space: pre-wrap;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+
+  #preview-content::-webkit-scrollbar { width: 4px; }
+  #preview-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .download-btn {
+    display: block;
+    width: calc(100% - 2.4rem);
+    margin: 0 1.2rem 1.2rem;
+    padding: 0.75rem;
+    background: var(--green);
+    color: #0a0a0f;
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: 0.95rem;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: center;
+    transition: opacity 0.2s, transform 0.15s;
+    letter-spacing: 0.03em;
+  }
+
+  .download-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+
+  /* Pulse animation for badge */
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+  .live-dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    background: var(--green);
+    border-radius: 50%;
+    margin-right: 6px;
+    animation: pulse 2s infinite;
+    vertical-align: middle;
+  }
+
+  @media (max-width: 600px) {
+    .options-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="badge"><span class="live-dot"></span>AI-Powered</div>
+  <h1>CodeDoc</h1>
+  <p class="subtitle">// paste code → get a polished .docx</p>
+</header>
+
+<div class="container">
+
+  <!-- Code input -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Your Code</span>
+      <div class="dot-row"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+    </div>
+    <textarea id="codeInput" placeholder="// Paste your code here...&#10;function greet(name) {&#10;  return `Hello, ${name}!`;&#10;}"></textarea>
+  </div>
+
+  <!-- Options -->
+  <div class="options-row">
+    <div class="field">
+      <label>Document Title</label>
+      <input type="text" id="docTitle" placeholder="My Code Documentation" />
+    </div>
+    <div class="field">
+      <label>Doc Style</label>
+      <select id="docStyle">
+        <option value="technical">Technical Reference</option>
+        <option value="readme">README / Overview</option>
+        <option value="tutorial">Tutorial / Guide</option>
+        <option value="api">API Documentation</option>
+        <option value="review">Code Review Report</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Custom prompt -->
+  <div class="prompt-field">
+    <label>Additional Instructions (optional)</label>
+    <textarea id="customPrompt" placeholder="e.g. Focus on security implications, include usage examples, write for a junior developer audience..."></textarea>
+  </div>
+
+  <!-- Generate -->
+  <button class="btn" id="generateBtn" onclick="generateDoc()">
+    ✦ Generate Document
+  </button>
+
+  <div id="status"></div>
+
+  <!-- Preview + Download -->
+  <div id="preview">
+    <div class="panel-header">
+      <span class="panel-title">Document Preview</span>
+      <span style="font-family:var(--mono);font-size:0.7rem;color:var(--green);">READY</span>
+    </div>
+    <div id="preview-content"></div>
+    <button class="download-btn" id="downloadBtn">⬇ Download .docx</button>
+  </div>
+
+</div>
+
+<!-- docx library -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script>
+// We'll use docx via CDN (UMD build)
+</script>
+<script src="https://unpkg.com/docx@8.5.0/build/index.umd.js"></script>
+<script>
+let generatedContent = null;
+
+// Updated to focus on webpage content extraction
+const STYLE_PROMPTS = {
+  technical: "Extract all text content. Organize it by headings and subheadings as they appear in the UI.",
+  readme: "Summarize the webpage content into a clean document layout.",
+  tutorial: "Extract the content and format it as a step-by-step instructional guide based on the page flow.",
+  api: "Extract all data fields, labels, and values into a structured reference list.",
+  review: "Analyze the visible copy and layout, providing a structured report of the page's messaging."
+};
+
+function setStatus(type, msg) {
+  const el = document.getElementById('status');
+  el.className = type;
+  el.style.display = 'block';
+  el.innerHTML = msg;
+}
+
+async function generateDoc() {
+  const code = document.getElementById('codeInput').value.trim();
+  if (!code) { setStatus('error', '⚠ Please paste some code first.'); return; }
+
+  const title = document.getElementById('docTitle').value.trim() || 'Webpage Content Export';
+  const style = document.getElementById('docStyle').value;
+  const extra = document.getElementById('customPrompt').value.trim();
+
+  const API_KEY = "AIzaSyAjseT3o8aTkBeui7OFtgqjQqp8KBe6B7E"; 
+
+  document.getElementById('generateBtn').disabled = true;
+  document.getElementById('preview').style.display = 'none';
+  setStatus('loading', '<span class="spinner"></span>Gemini is extracting webpage content…');
+
+  const systemInstruction = `You are a Content Extraction Expert. 
+Your task: Read the provided HTML/CSS/JS code and recreate the visible text and structure of the webpage as a clean document.
+Rules:
+1. Identify the main Title, Headings (H1, H2), and Body text.
+2. If there are buttons or links, list them as text items.
+3. Format your response using these exact markers:
+   - ## SECTION: [Title]
+   - ### [Sub-header]
+   - Use plain dashes (-) for list items.
+4. Do NOT explain the code. Do NOT include technical tags. 
+5. Provide ONLY the final content that a user would see on the screen.`;
+
+  const userPrompt = `${STYLE_PROMPTS[style]}
+${extra ? `\nAdditional instructions: ${extra}` : ''}
+
+Here is the source code:
+\`\`\`
+${code}
+\`\`\``;
+
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{ text: `${systemInstruction}\n\n${userPrompt}` }]
+        }]
+      })
+    });
+
+    const data = await response.json();
+    if (!response.ok || data.error) throw new Error(data.error?.message || 'Gemini API error');
+
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    generatedContent = { title, content, code };
+
+    document.getElementById('preview-content').textContent = content;
+    document.getElementById('preview').style.display = 'block';
+    setStatus('success', '✓ Content Extracted — Preview below.');
+    document.getElementById('downloadBtn').onclick = () => buildAndDownloadDocx(title, content, code);
+
+  } catch (err) {
+    setStatus('error', `✕ Error: ${err.message}`);
+  } finally {
+    document.getElementById('generateBtn').disabled = false;
+  }
+}
+function parseContentToSections(text) {
+  const lines = text.split('\n');
+  const sections = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) { sections.push({ type: 'empty' }); continue; }
+    if (trimmed.startsWith('## SECTION:')) {
+      sections.push({ type: 'h1', text: trimmed.replace('## SECTION:', '').trim() });
+    } else if (trimmed.startsWith('###')) {
+      sections.push({ type: 'h2', text: trimmed.replace(/^###\s*/, '') });
+    } else if (trimmed.startsWith('##')) {
+      sections.push({ type: 'h1', text: trimmed.replace(/^##\s*/, '') });
+    } else if (trimmed.startsWith('```')) {
+      sections.push({ type: 'code_fence' });
+    } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+      sections.push({ type: 'bullet', text: trimmed.replace(/^[-*]\s+/, '') });
+    } else {
+      sections.push({ type: 'para', text: trimmed });
+    }
+  }
+  return sections;
+}
+
+async function buildAndDownloadDocx(title, content, code) {
+  const {
+    Document, Packer, Paragraph, TextRun, HeadingLevel,
+    AlignmentType, BorderStyle, ShadingType, WidthType,
+    LevelFormat, Table, TableRow, TableCell
+  } = docx;
+
+  const sections = parseContentToSections(content);
+  const children = [];
+
+  // Title
+  children.push(new Paragraph({
+    heading: HeadingLevel.TITLE,
+    children: [new TextRun({ text: title, bold: true, size: 52, color: '1a1a2e' })]
+  }));
+
+  // Divider paragraph
+  children.push(new Paragraph({
+    border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '6c63ff', space: 1 } },
+    spacing: { after: 200 },
+    children: []
+  }));
+
+  let inCode = false;
+  let codeBuffer = [];
+
+  for (const sec of sections) {
+    if (sec.type === 'code_fence') {
+      if (!inCode) { inCode = true; codeBuffer = []; }
+      else {
+        // Flush code block
+        for (const cl of codeBuffer) {
+          children.push(new Paragraph({
+            shading: { fill: 'f0f0f8', type: ShadingType.CLEAR },
+            spacing: { before: 40, after: 40 },
+            indent: { left: 360 },
+            children: [new TextRun({ text: cl || ' ', font: 'Courier New', size: 18, color: '2d2d6b' })]
+          }));
+        }
+        inCode = false; codeBuffer = [];
+      }
+      continue;
+    }
+    if (inCode) { codeBuffer.push(sec.text || ''); continue; }
+
+    if (sec.type === 'empty') {
+      children.push(new Paragraph({ spacing: { after: 80 }, children: [] }));
+    } else if (sec.type === 'h1') {
+      children.push(new Paragraph({
+        heading: HeadingLevel.HEADING_1,
+        spacing: { before: 300, after: 120 },
+        children: [new TextRun({ text: sec.text, bold: true, size: 32, color: '6c63ff' })]
+      }));
+    } else if (sec.type === 'h2') {
+      children.push(new Paragraph({
+        heading: HeadingLevel.HEADING_2,
+        spacing: { before: 200, after: 80 },
+        children: [new TextRun({ text: sec.text, bold: true, size: 26, color: '333366' })]
+      }));
+    } else if (sec.type === 'bullet') {
+      children.push(new Paragraph({
+        numbering: { reference: 'bullets', level: 0 },
+        spacing: { after: 60 },
+        children: [new TextRun({ text: sec.text, size: 22 })]
+      }));
+    } else if (sec.type === 'para') {
+      children.push(new Paragraph({
+        spacing: { after: 120 },
+        children: [new TextRun({ text: sec.text, size: 22 })]
+      }));
+    }
+  }
+
+  // Appendix: original code
+  children.push(new Paragraph({ spacing: { before: 400, after: 0 }, children: [] }));
+  children.push(new Paragraph({
+    border: { top: { style: BorderStyle.SINGLE, size: 4, color: 'cccccc', space: 1 } },
+    spacing: { before: 200, after: 120 },
+    children: [new TextRun({ text: 'Appendix — Original Code', bold: true, size: 28, color: '555566' })]
+  }));
+  const codeLines = code.split('\n');
+  for (const line of codeLines) {
+    children.push(new Paragraph({
+      shading: { fill: 'f5f5fa', type: ShadingType.CLEAR },
+      spacing: { before: 20, after: 20 },
+      indent: { left: 360 },
+      children: [new TextRun({ text: line || ' ', font: 'Courier New', size: 18, color: '2d2d6b' })]
+    }));
+  }
+
+  const doc = new Document({
+    numbering: {
+      config: [{
+        reference: 'bullets',
+        levels: [{
+          level: 0,
+          format: LevelFormat.BULLET,
+          text: '•',
+          alignment: AlignmentType.LEFT,
+          style: { paragraph: { indent: { left: 720, hanging: 360 } } }
+        }]
+      }]
+    },
+    sections: [{
+      properties: {
+        page: {
+          size: { width: 12240, height: 15840 },
+          margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
+        }
+      },
+      children
+    }]
+  });
+
+  const buffer = await Packer.toBlob(doc);
+  const url = URL.createObjectURL(buffer);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${title.replace(/[^a-z0-9]/gi, '_')}.docx`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+</script>
+</body>
+</html>
