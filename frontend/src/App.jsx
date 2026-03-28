@@ -1,5 +1,7 @@
 import { useState, useRef } from "react";
 import { marked } from "marked";
+import LandingPage from "./LandingPage";
+import SavedDocuments from "./SavedDocuments";
 import "./App.css";
 
 const API = "http://localhost:5000";
@@ -178,6 +180,9 @@ function OverlapModal({ overlaps, transcripts, onSelect, onClose }) {
 /* ─── Main App ────────────────────────────────────────────────────────── */
 
 export default function App() {
+  // ── Landing Page State ──────────────────────────────
+  const [showLandingPage, setShowLandingPage] = useState(true);
+
   // ── CodeDoc ─────────────────────────────────────────
   const [code, setCode]       = useState("");
   const [title, setTitle]     = useState("");
@@ -208,6 +213,11 @@ export default function App() {
   const [previewText, setPreviewText]         = useState("");
   const [refinementPrompt, setRefinementPrompt] = useState("");
   const [refineLoading, setRefineLoading]     = useState(false);
+
+  // ── Saved Documents ─────────────────────────────────
+  const [showSavedDocuments, setShowSavedDocuments] = useState(false);
+  const [selectedDocumentId, setSelectedDocumentId] = useState(null);
+  const [savedDocument, setSavedDocument] = useState(null);
 
   const codeDocRef = useRef(null);
 
@@ -288,6 +298,9 @@ export default function App() {
       setPreview(data.result);
       setPreviewText(data.result);
       setStatus({ type: "success", message: "✅ Documentation generated!" });
+      
+      // Auto-save to database
+      await saveDocumentToDB(data.result, code);
     } catch (err) {
       setStatus({ type: "error", message: "❌ " + err.message });
     } finally {
@@ -312,6 +325,9 @@ export default function App() {
       setPreviewText(data.result);
       setRefinementPrompt("");
       setStatus({ type: "success", message: "✨ Documentation refined!" });
+      
+      // Save refined document to database
+      await saveDocumentToDB(data.result, code);
     } catch (err) {
       setStatus({ type: "error", message: "❌ " + err.message });
     } finally {
@@ -402,13 +418,96 @@ export default function App() {
     setShowOverlapModal(false);
   };
 
+  const loadSavedDocument = async (documentId) => {
+    try {
+      const res = await fetch(`${API}/document/${documentId}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      
+      const doc = data.document;
+      setSavedDocument(doc);
+      setPreviewText(doc.content);
+      setCode(doc.htmlContent || "");
+      setTitle(doc.documentTitle);
+      setStyle(doc.style);
+      setShowSavedDocuments(false);
+      setSelectedDocumentId(documentId);
+    } catch (err) {
+      alert("Failed to load document: " + err.message);
+    }
+  };
+
+  const saveDocumentToDB = async (content, htmlContent) => {
+    if (!title || !content) {
+      console.warn("⚠️ Cannot save: missing title or content", { title, contentLength: content?.length });
+      return;
+    }
+
+    try {
+      const projectName = title || "Untitled";
+      const documentTitle = `${title || "Document"} - ${new Date().toLocaleDateString()}`;
+      
+      const payload = {
+        projectName,
+        documentTitle,
+        content,
+        htmlContent: htmlContent || "",
+        style,
+        description: `Auto-saved document from ${new Date().toLocaleString()}`,
+        tags: [style, "auto-saved"],
+      };
+      
+      console.log("💾 Saving to database:", { projectName, documentTitle, contentLength: content.length });
+      
+      const res = await fetch(`${API}/save-document`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      
+      if (!res.ok) {
+        console.error("❌ Save failed:", data.error);
+        throw new Error(data.error);
+      }
+      
+      console.log("✅ Document saved:", data.documentId);
+      setSelectedDocumentId(data.documentId);
+      setStatus({ type: "success", message: "💾 Document saved to database!" });
+    } catch (err) {
+      console.error("Save error:", err.message);
+      // Non-critical error, don't block the user
+    }
+  };
+
   /* ── render ── */
+  if (showLandingPage) {
+    return <LandingPage onStart={() => setShowLandingPage(false)} />;
+  }
+
   return (
     <div className="app">
       <header className="app-header">
-        <h1>🚀 CodeDoc <span className="header-plus">+</span> Video AI</h1>
-        <p className="app-subtitle">Transcribe videos → generate HTML → produce documentation</p>
+        <div style={{ flex: 1 }}>
+          <h1>🚀 CodeDoc <span className="header-plus">+</span> Video AI</h1>
+          <p className="app-subtitle">Transcribe videos → generate HTML → produce documentation</p>
+        </div>
+        <button 
+          className="btn btn-saved-docs"
+          onClick={() => setShowSavedDocuments(true)}
+          title="View saved projects and documents"
+        >
+          📁 Saved Projects
+        </button>
       </header>
+
+      {showSavedDocuments && (
+        <SavedDocuments
+          onClose={() => setShowSavedDocuments(false)}
+          onSelectDocument={loadSavedDocument}
+        />
+      )}
 
       {/* STEP 01 · VIDEO → TRANSCRIPT */}
       <section className="card">

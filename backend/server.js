@@ -3,9 +3,11 @@ const express = require("express");
 const multer = require("multer");
 const axios = require("axios");
 const cors = require("cors");
+const mongoose = require("mongoose");
 const { PassThrough } = require("stream");
 const { marked } = require("marked");
 const PDFDocument = require("pdfkit");
+const { Document: DBDocument, Project } = require("./models");
 const {
   Document, Packer, Paragraph, TextRun, HeadingLevel,
   AlignmentType, LevelFormat, BorderStyle, WidthType,
@@ -13,6 +15,14 @@ const {
 } = require("docx");
 
 const app = express();
+
+// ── MongoDB Connection ───────────────────────────────────
+const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/codedoc";
+mongoose.connect(MONGODB_URI).then(() => {
+  console.log("✅ MongoDB connected");
+}).catch(err => {
+  console.warn("⚠️ MongoDB connection failed:", err.message);
+});
 
 // ── Increase payload limits ──────────────────────────────
 app.use(cors());
@@ -616,6 +626,308 @@ app.post("/download-pdf", async (req, res) => {
   } catch (err) {
     console.error("PDF Error:", err.message);
     res.status(500).json({ error: "PDF generation failed: " + err.message });
+  }
+});
+
+// ──────────────────────────────────────────────────────────
+// ── UTILITY: Generate PDF from Markdown ──────────────────
+function generatePdfFromMarkdown(markdown, title) {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ margin: 50 });
+      const chunks = [];
+
+      doc.on('data', (chunk) => chunks.push(chunk));
+      doc.on('end', () => {
+        const pdfBuffer = Buffer.concat(chunks);
+        const base64Pdf = pdfBuffer.toString('base64');
+        resolve(base64Pdf);
+      });
+      doc.on('error', reject);
+
+      // Add title
+      doc.fontSize(20).font('Helvetica-Bold').text(title || 'Document', { underline: true });
+      doc.moveDown(0.5);
+
+      // Parse and format markdown
+      const lines = markdown.split('\n');
+      lines.forEach((line) => {
+        if (line.startsWith('# ')) {
+          doc.fontSize(16).font('Helvetica-Bold').text(line.substring(2));
+          doc.moveDown(0.3);
+        } else if (line.startsWith('## ')) {
+          doc.fontSize(14).font('Helvetica-Bold').text(line.substring(3));
+          doc.moveDown(0.2);
+        } else if (line.startsWith('### ')) {
+          doc.fontSize(12).font('Helvetica-Bold').text(line.substring(4));
+          doc.moveDown(0.2);
+        } else if (line.startsWith('- ')) {
+          doc.fontSize(11).font('Helvetica').text('• ' + line.substring(2), { indent: 20 });
+          doc.moveDown(0.1);
+        } else if (line.startsWith('* ')) {
+          doc.fontSize(11).font('Helvetica').text('• ' + line.substring(2), { indent: 20 });
+          doc.moveDown(0.1);
+        } else if (line.trim().length > 0) {
+          doc.fontSize(11).font('Helvetica').text(line);
+          doc.moveDown(0.1);
+        } else {
+          doc.moveDown(0.2);
+        }
+      });
+
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+// ──────────────────────────────────────────────────────────
+// DATABASE ENDPOINTS - SAVE/RETRIEVE DOCUMENTS
+// ──────────────────────────────────────────────────────────
+
+// Save document to database
+app.post("/save-document", async (req, res) => {
+  const { projectName, documentTitle, content, htmlContent, style, videoTranscript, tags, description } = req.body;
+  
+  console.log("📥 Save Document Request:", { projectName, documentTitle, contentLength: content?.length });
+  
+  if (!projectName || !documentTitle || !content) {
+    console.warn("❌ Missing required fields:", { projectName: !!projectName, documentTitle: !!documentTitle, content: !!content });
+    return res.status(400).json({ error: "Missing required fields: projectName, documentTitle, content" });
+  }
+
+  try {
+    // Generate PDF from markdown content
+    console.log("🖨️ Generating PDF...");
+    const pdfBase64 = await generatePdfFromMarkdown(content, documentTitle);
+    console.log("✅ PDF generated, size:", Math.round(pdfBase64.length / 1024), "KB");
+
+    // Create new document
+    const newDocument = new DBDocument({
+      projectName,
+      sessionId: new Date().toISOString(),
+      documentTitle,
+      documentType: 'markdown',
+      content,
+      htmlContent: htmlContent || "",
+      pdfData: pdfBase64,
+      style: style || 'technical',
+      videoTranscript: videoTranscript || "",
+      tags: tags || [],
+      description: description || "",
+      status: 'completed',
+    });
+
+    console.log("💾 Saving document to MongoDB...", newDocument._id);
+    await newDocument.save();
+    console.log("✅ Document saved:", newDocument._id);
+
+    // Update or create project
+    const project = await Project.findOne({ projectName });
+    if (project) {
+      project.documentCount += 1;
+      await project.save();
+      console.log("📊 Updated project count for:", projectName);
+    } else {
+      await Project.create({
+        projectName,
+        description: `Auto-created for ${projectName}`,
+        documentCount: 1,
+        sessions: [{ sessionId: newDocument.sessionId, createdAt: new Date(), documentCount: 1 }],
+      });
+      console.log("📁 Created new project:", projectName);
+    }
+
+    res.json({ 
+      success: true, 
+      message: "Document saved successfully",
+      documentId: newDocument._id,
+    });
+  } catch (err) {
+    console.error("Save Document Error:", err);
+    console.error("Stack:", err.stack);
+    res.status(500).json({ error: "Failed to save document: " + err.message });
+  }
+});
+
+// Get all projects
+app.get("/projects", async (req, res) => {
+  try {
+    const projects = await Project.find().sort({ createdAt: -1 });
+    res.json({ projects });
+  } catch (err) {
+    console.error("Get Projects Error:", err.message);
+    res.status(500).json({ error: "Failed to fetch projects" });
+  }
+});
+
+// Get documents by project name
+app.get("/documents/:projectName", async (req, res) => {
+  const { projectName } = req.params;
+
+  try {
+    const documents = await DBDocument.find({ projectName }).sort({ createdAt: -1 });
+    const project = await Project.findOne({ projectName });
+
+    res.json({ 
+      projectName,
+      documentCount: documents.length,
+      documents,
+      project,
+    });
+  } catch (err) {
+    console.error("Get Documents Error:", err.message);
+    res.status(500).json({ error: "Failed to fetch documents" });
+  }
+});
+
+// Get single document by ID
+app.get("/document/:documentId", async (req, res) => {
+  const { documentId } = req.params;
+
+  try {
+    const document = await DBDocument.findById(documentId);
+    if (!document) {
+      return res.status(404).json({ error: "Document not found" });
+    }
+
+    res.json({ document });
+  } catch (err) {
+    console.error("Get Document Error:", err.message);
+    res.status(500).json({ error: "Failed to fetch document" });
+  }
+});
+
+// Update document
+app.put("/document/:documentId", async (req, res) => {
+  const { documentId } = req.params;
+  const { documentTitle, content, htmlContent, style, tags, description, status } = req.body;
+
+  try {
+    const document = await DBDocument.findByIdAndUpdate(
+      documentId,
+      { 
+        ...(documentTitle && { documentTitle }),
+        ...(content && { content }),
+        ...(htmlContent && { htmlContent }),
+        ...(style && { style }),
+        ...(tags && { tags }),
+        ...(description && { description }),
+        ...(status && { status }),
+      },
+      { new: true }
+    );
+
+    if (!document) {
+      return res.status(404).json({ error: "Document not found" });
+    }
+
+    res.json({ success: true, document });
+  } catch (err) {
+    console.error("Update Document Error:", err.message);
+    res.status(500).json({ error: "Failed to update document" });
+  }
+});
+
+// Delete document
+app.delete("/document/:documentId", async (req, res) => {
+  const { documentId } = req.params;
+
+  try {
+    const document = await DBDocument.findByIdAndDelete(documentId);
+    if (!document) {
+      return res.status(404).json({ error: "Document not found" });
+    }
+
+    // Update project count
+    const project = await Project.findOne({ projectName: document.projectName });
+    if (project) {
+      project.documentCount = Math.max(0, project.documentCount - 1);
+      await project.save();
+    }
+
+    res.json({ success: true, message: "Document deleted" });
+  } catch (err) {
+    console.error("Delete Document Error:", err.message);
+    res.status(500).json({ error: "Failed to delete document" });
+  }
+});
+
+// Get sessions for a project
+app.get("/project-sessions/:projectName", async (req, res) => {
+  const { projectName } = req.params;
+
+  try {
+    const documents = await DBDocument.find({ projectName }).select('sessionId createdAt documentTitle');
+    const sessions = {};
+
+    documents.forEach(doc => {
+      if (!sessions[doc.sessionId]) {
+        sessions[doc.sessionId] = {
+          sessionId: doc.sessionId,
+          createdAt: doc.createdAt,
+          documents: [],
+        };
+      }
+      sessions[doc.sessionId].documents.push({
+        documentId: doc._id,
+        documentTitle: doc.documentTitle,
+      });
+    });
+
+    res.json({ projectName, sessions: Object.values(sessions) });
+  } catch (err) {
+    console.error("Get Sessions Error:", err.message);
+    res.status(500).json({ error: "Failed to fetch sessions" });
+  }
+});
+
+// ──────────────────────────────────────────────────────────
+// DOWNLOAD ENDPOINTS - RETRIEVE FILES FROM DATABASE
+// ──────────────────────────────────────────────────────────
+
+// Download PDF from database
+app.get("/download-pdf-from-db/:documentId", async (req, res) => {
+  const { documentId } = req.params;
+
+  try {
+    const document = await DBDocument.findById(documentId);
+    if (!document) {
+      return res.status(404).json({ error: "Document not found" });
+    }
+
+    if (!document.pdfData) {
+      return res.status(404).json({ error: "PDF not found for this document" });
+    }
+
+    // Convert base64 to buffer and send as PDF
+    const pdfBuffer = Buffer.from(document.pdfData, 'base64');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${document.documentTitle.replace(/\s+/g, '_')}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    console.error("Download PDF Error:", err.message);
+    res.status(500).json({ error: "Failed to download PDF" });
+  }
+});
+
+// Download Markdown from database
+app.get("/download-markdown-from-db/:documentId", async (req, res) => {
+  const { documentId } = req.params;
+
+  try {
+    const document = await DBDocument.findById(documentId);
+    if (!document) {
+      return res.status(404).json({ error: "Document not found" });
+    }
+
+    res.setHeader('Content-Type', 'text/markdown');
+    res.setHeader('Content-Disposition', `attachment; filename="${document.documentTitle.replace(/\s+/g, '_')}.md"`);
+    res.send(document.content);
+  } catch (err) {
+    console.error("Download Markdown Error:", err.message);
+    res.status(500).json({ error: "Failed to download markdown" });
   }
 });
 
