@@ -4,6 +4,8 @@ const multer = require("multer");
 const axios = require("axios");
 const cors = require("cors");
 const { PassThrough } = require("stream");
+const { marked } = require("marked");
+const PDFDocument = require("pdfkit");
 const {
   Document, Packer, Paragraph, TextRun, HeadingLevel,
   AlignmentType, LevelFormat, BorderStyle, WidthType,
@@ -29,18 +31,42 @@ const upload = multer({
 });
 
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
-const GEMINI_API_KEY   = process.env.GEMINI_API_KEY;
+const GROQ_API_KEY   = process.env.GROQ_API_KEY;
 
 // ──────────────────────────────────────────────────────────
-// Helper: call Gemini
+// Helper: call Groq API
 // ──────────────────────────────────────────────────────────
 async function callGemini(prompt) {
-  const res = await axios.post(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-    { contents: [{ parts: [{ text: prompt }] }] },
-    { headers: { "Content-Type": "application/json" } }
-  );
-  return res.data.candidates[0].content.parts[0].text.trim();
+  if (!GROQ_API_KEY) {
+    throw new Error("GROQ_API_KEY not configured in .env");
+  }
+  
+  try {
+    const res = await axios.post(
+      `https://api.groq.com/openai/v1/chat/completions`,
+      {
+        model: "llama-3.1-8b-instant",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.7,
+        max_tokens: 4096,
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${GROQ_API_KEY}`,
+        },
+      }
+    );
+    
+    if (!res.data.choices || !res.data.choices[0]) {
+      throw new Error("Invalid API response: No choices returned");
+    }
+    
+    return res.data.choices[0].message.content.trim();
+  } catch (error) {
+    console.error("Groq API Error:", error.response?.data || error.message);
+    throw error;
+  }
 }
 
 // ──────────────────────────────────────────────────────────
@@ -121,7 +147,7 @@ ${transcript}`
     res.json({ html });
   } catch (err) {
     console.error("HTML Gen Error:", err.response?.data || err.message);
-    res.status(500).json({ error: "HTML generation failed" });
+    res.status(500).json({ error: "HTML generation failed: " + (err.response?.data?.error?.message || err.message) });
   }
 });
 
@@ -133,23 +159,47 @@ app.post("/generate-doc", async (req, res) => {
   if (!code) return res.status(400).json({ error: "No code provided" });
 
   try {
-    const userPrompt = prompt || "Create clear, concise documentation";
+    const userPrompt = prompt || "Create clear, professional documentation";
+    const styleGuide = {
+      technical: "formal, precise, technical jargon acceptable with definitions",
+      narrative: "conversational, engaging, story-like flow with examples",
+      concise: "brief, direct, to-the-point with minimal elaboration",
+      academic: "scholarly, well-researched, with proper citations and depth",
+    };
+    
     const result = await callGemini(
-      `Generate ${style || "technical"} documentation in markdown format.
+      `Generate high-quality ${style || "technical"} documentation in clean markdown format.
 
 Title: ${title || "HTML Documentation"}
-Instructions: ${userPrompt}
+Style: ${styleGuide[style] || "professional"}
+User Instructions: ${userPrompt}
 
-HTML Code:
+HTML/Code to Document:
 \`\`\`html
 ${code}
 \`\`\`
 
-Return ONLY clean markdown with:
-- Brief overview (1-2 sentences)
-- Key sections with ## headings
-- Key points with - bullets
-Use **bold** for important terms. No extra sections or preamble.`
+CREATE COMPREHENSIVE DOCUMENTATION WITH:
+1. **Overview Section** (2-3 sentences explaining the purpose and key features)
+2. **Key Concepts** (if applicable) - major components or ideas
+3. **Structure/Architecture** - how the code is organized
+4. **Main Features** - what functionality it provides
+5. **Usage Instructions** - how to use or implement
+6. **Best Practices** - important considerations and tips
+7. **Examples** - practical code examples or use cases
+
+FORMATTING REQUIREMENTS:
+- Use ## for main section headings
+- Use - for bullet points with clear indentation
+- Bold important terms with **word**
+- Include code examples in \`\`\`html\`\`\` blocks
+- Make content scannable and well-structured
+- Ensure logical flow and progressive complexity
+
+OUTPUT:
+Return ONLY the markdown documentation (no markdown fences, no preamble).
+Make it professional, thorough, and ${styleGuide[style] || "accessible"}.
+Add real value that would help someone understand and use this code.`
     );
 
     res.json({ result });
@@ -167,27 +217,45 @@ app.post("/refine-doc", async (req, res) => {
   if (!markdown) return res.status(400).json({ error: "No documentation provided" });
 
   try {
-    const refinePrompt = refinement || "Improve clarity and structure";
+    const userFeedback = refinement || "Improve overall quality, clarity, and completeness";
     const result = await callGemini(
-      `Refine the following markdown documentation based on the feedback.
+      `You are an expert technical writer specializing in ${style} documentation.
 
-Current Documentation:
+CURRENT DOCUMENTATION:
 \`\`\`markdown
 ${markdown}
 \`\`\`
 
-Refinement Instructions: ${refinePrompt}
+USER REFINEMENT REQUEST:
+${userFeedback}
 
-HTML Context (if needed):
+CONTEXT (HTML Code being documented):
 \`\`\`html
 ${code || ""}
 \`\`\`
 
-Return ONLY the refined markdown. Keep the same format:
-- Brief overview
-- Key sections with ## headings
-- Key points with - bullets
-Use **bold** for important terms. No extra sections or preamble.`
+REFINEMENT GUIDELINES:
+Apply these principles to enhance the documentation:
+1. **Clarity**: Use simple, direct language. Avoid jargon or explain it.
+2. **Structure**: Organize logically with clear headings. Use progressive disclosure.
+3. **Completeness**: Add missing details, edge cases, and examples where helpful.
+4. **Accessibility**: Include context for beginners. Add explanatory phrases.
+5. **Formatting**: Use code blocks for technical content, bold for key terms.
+6. **Tone**: Maintain a ${style === "technical" ? "formal and precise" : style === "narrative" ? "conversational and engaging" : style === "concise" ? "brief and direct" : "professional and balanced"} tone.
+7. **Examples**: Add practical examples where they clarify concepts.
+8. **Engagement**: Make the content valuable and easy to scan.
+
+OUTPUT REQUIREMENTS:
+- Return ONLY the refined markdown (no additional text)
+- Preserve the original structure but enhance content
+- Add sections or expand existing ones as needed
+- Keep markdown formatting clean and consistent
+- Ensure all headings use ## (H2) for main sections
+- Use - for bullet points and proper indentation
+- Bold important terms with **word**
+- Include code examples in \`\`\`language blocks\`\`\`
+
+Refine the documentation now, incorporating the user's feedback while maintaining professional quality.`
     );
 
     res.json({ result });
@@ -448,6 +516,106 @@ app.post("/download-docx", async (req, res) => {
   } catch (err) {
     console.error("DOCX Error:", err.message);
     res.status(500).json({ error: "DOCX generation failed: " + err.message });
+  }
+});
+
+// ──────────────────────────────────────────────────────────
+// DOWNLOAD AS PDF
+// ──────────────────────────────────────────────────────────
+app.post("/download-pdf", async (req, res) => {
+  const { markdown, title } = req.body;
+  if (!markdown) return res.status(400).json({ error: "No content provided" });
+
+  try {
+    const doc = new PDFDocument({
+      margin: 50,
+      size: 'A4',
+      bufferPages: true,
+    });
+
+    // Title
+    doc.fontSize(24).font('Helvetica-Bold').fillColor('#2c3e50').text(title || "Documentation");
+    doc.moveDown(0.3);
+    doc.strokeColor('#3498db').lineWidth(2).moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+    doc.moveDown(0.8);
+
+    // Process markdown line by line
+    const lines = markdown.split('\n');
+    
+    lines.forEach(line => {
+      const trimmed = line.trim();
+      
+      if (!trimmed) {
+        // Empty line - add spacing
+        doc.moveDown(0.3);
+      } else if (trimmed.startsWith('# ')) {
+        // H1
+        doc.fontSize(20).font('Helvetica-Bold').fillColor('#2c3e50');
+        doc.text(trimmed.slice(2));
+        doc.moveDown(0.3);
+      } else if (trimmed.startsWith('## ')) {
+        // H2
+        doc.fontSize(16).font('Helvetica-Bold').fillColor('#2c3e50');
+        doc.text(trimmed.slice(3));
+        doc.moveDown(0.2);
+      } else if (trimmed.startsWith('### ')) {
+        // H3
+        doc.fontSize(13).font('Helvetica-Bold').fillColor('#34495e');
+        doc.text(trimmed.slice(4));
+        doc.moveDown(0.2);
+      } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+        // Bullet point
+        doc.fontSize(11).font('Helvetica').fillColor('#333333');
+        const bulletText = trimmed.slice(2);
+        doc.text(`• ${bulletText}`, {
+          indent: 20,
+          width: 450,
+        });
+        doc.moveDown(0.15);
+      } else if (trimmed.startsWith('```')) {
+        // Code block fence - skip (simplified)
+        return;
+      } else if (trimmed.startsWith('> ')) {
+        // Blockquote
+        doc.fontSize(10).font('Helvetica-Oblique').fillColor('#7f8c8d');
+        doc.text(trimmed.slice(2), {
+          indent: 20,
+          width: 430,
+        });
+        doc.moveDown(0.2);
+      } else {
+        // Regular paragraph text
+        doc.fontSize(11).font('Helvetica').fillColor('#333333');
+        
+        // Handle bold (**text**)
+        let processedText = trimmed;
+        const boldRegex = /\*\*([^\*]+)\*\*/g;
+        
+        // Simple check for bold text
+        if (boldRegex.test(trimmed)) {
+          doc.fontSize(11).fillColor('#2c3e50').text(trimmed.replace(/\*\*/g, ''), {
+            width: 450,
+          });
+        } else {
+          doc.text(trimmed, {
+            width: 450,
+          });
+        }
+        doc.moveDown(0.2);
+      }
+    });
+
+    // Set response headers
+    res.setHeader('Content-Type', 'application/pdf');
+    const safeName = (title || "documentation").replace(/\s+/g, "_");
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.pdf"`);
+
+    // Pipe PDF to response
+    doc.pipe(res);
+    doc.end();
+  } catch (err) {
+    console.error("PDF Error:", err.message);
+    res.status(500).json({ error: "PDF generation failed: " + err.message });
   }
 });
 

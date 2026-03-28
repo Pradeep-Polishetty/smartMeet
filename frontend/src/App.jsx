@@ -1,19 +1,184 @@
 import { useState, useRef } from "react";
-import {
-  CodeInput,
-  Options,
-  PromptBox,
-  GenerateButton,
-  Preview,
-  Status,
-} from "./components/Components";
-import OverlapModal from "./components/OverlapModal";
+import { marked } from "marked";
 import "./App.css";
 
 const API = "http://localhost:5000";
 
+/* ─── tiny sub-components baked in ───────────────────────────────────── */
+
+function CodeInput({ code, setCode }) {
+  return (
+    <div className="field-row">
+      <span className="options-label">HTML / Code Input</span>
+      <textarea
+        className="mono-textarea code-textarea"
+        rows={12}
+        placeholder="Paste HTML here, or send it from Step 02 above…"
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+      />
+    </div>
+  );
+}
+
+function Options({ title, setTitle, style, setStyle }) {
+  return (
+    <div className="options-row">
+      <div className="input-group">
+        <span className="options-label">Document Title</span>
+        <input
+          className="text-input"
+          placeholder="My Project Docs"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+      </div>
+      <div className="input-group">
+        <span className="options-label">Style</span>
+        <select value={style} onChange={(e) => setStyle(e.target.value)}>
+          <option value="technical">Technical</option>
+          <option value="narrative">Narrative</option>
+          <option value="concise">Concise</option>
+          <option value="academic">Academic</option>
+        </select>
+      </div>
+    </div>
+  );
+}
+
+function PromptBox({ prompt, setPrompt }) {
+  return (
+    <div className="field-row">
+      <span className="options-label">Custom Instructions (optional)</span>
+      <textarea
+        className="mono-textarea"
+        rows={3}
+        placeholder="e.g. Focus on API endpoints only, include code examples…"
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+      />
+    </div>
+  );
+}
+
+function GenerateButton({ loading, generateDoc }) {
+  return (
+    <button className="generate-btn" onClick={generateDoc} disabled={loading}>
+      {loading
+        ? <><span className="spinner" /> Generating Documentation…</>
+        : <><span>⚡</span> Generate Documentation</>}
+    </button>
+  );
+}
+
+function Status({ status }) {
+  if (!status.message) return null;
+  return (
+    <div className={`status status-${status.type}`}>
+      {status.message}
+    </div>
+  );
+}
+
+function Preview({ preview, previewText, setPreviewText, refinementPrompt, setRefinementPrompt, onRefine, refineLoading }) {
+  const [editMode, setEditMode] = useState(false);
+
+  if (!preview) return null;
+
+  const htmlContent = marked(previewText || preview);
+
+  return (
+    <div className="preview-container">
+      <div className="preview-header">
+        <span className="preview-label">✦ Generated Documentation</span>
+        <button
+          className="btn btn-secondary"
+          style={{ padding: "6px 12px", fontSize: "0.78rem" }}
+          onClick={() => setEditMode(!editMode)}
+        >
+          {editMode ? "👁 Preview" : "✏️ Edit"}
+        </button>
+      </div>
+
+      {editMode ? (
+        <textarea
+          className="mono-textarea"
+          rows={20}
+          value={previewText}
+          onChange={(e) => setPreviewText(e.target.value)}
+        />
+      ) : (
+        <div 
+          className="preview-box"
+          dangerouslySetInnerHTML={{ __html: htmlContent }}
+        />
+      )}
+
+      <div className="refinement-row">
+        <textarea
+          className="refinement-input"
+          rows={2}
+          placeholder="Refine: Add examples, include best practices, make it more concise, add usage instructions, focus on API details, etc…"
+          value={refinementPrompt}
+          onChange={(e) => setRefinementPrompt(e.target.value)}
+        />
+        <button
+          className="btn btn-secondary"
+          onClick={onRefine}
+          disabled={refineLoading}
+          style={{ flexShrink: 0 }}
+        >
+          {refineLoading ? <><span className="spinner" /> Refining…</> : "✨ Refine"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function OverlapModal({ overlaps, transcripts, onSelect, onClose }) {
+  return (
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <div className="modal-header">
+          <h2>🔍 Overlapping Topics Detected</h2>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          {overlaps.map((overlap, i) => (
+            <div
+              className="overlap-item"
+              key={i}
+              onClick={() => onSelect(overlap.excerpt)}
+            >
+              <div className="overlap-topic">{overlap.topic}</div>
+              {overlap.excerpt && (
+                <div className="overlap-excerpt">"{overlap.excerpt}"</div>
+              )}
+              {overlap.videoIds && (
+                <div className="overlap-videos">
+                  {overlap.videoIds.map((id) => {
+                    const vid = transcripts.find((t) => t.id === id);
+                    return vid ? (
+                      <span className="overlap-tag" key={id}>{vid.title}</span>
+                    ) : null;
+                  })}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Dismiss</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Main App ────────────────────────────────────────────────────────── */
+
 export default function App() {
-  // ── CodeDoc ─────────────────────────────────────────────
+  // ── CodeDoc ─────────────────────────────────────────
   const [code, setCode]       = useState("");
   const [title, setTitle]     = useState("");
   const [style, setStyle]     = useState("technical");
@@ -22,53 +187,43 @@ export default function App() {
   const [status, setStatus]   = useState({ type: "", message: "" });
   const [loading, setLoading] = useState(false);
 
-  // ── Video / Transcript ──────────────────────────────────
-  const [videoFile, setVideoFile]         = useState(null);
-  const [transcript, setTranscript]       = useState("");
-  const [videoTitle, setVideoTitle]       = useState("");
-  const [videoLoading, setVideoLoading]   = useState(false);
-  const [transcriptList, setTranscriptList] = useState([]); // [{id,title,text}]
+  // ── Video / Transcript ──────────────────────────────
+  const [videoFile, setVideoFile]           = useState(null);
+  const [transcript, setTranscript]         = useState("");
+  const [videoTitle, setVideoTitle]         = useState("");
+  const [videoLoading, setVideoLoading]     = useState(false);
+  const [transcriptList, setTranscriptList] = useState([]);
 
-  // ── HTML from transcript ────────────────────────────────
-  const [generatedHtml, setGeneratedHtml]   = useState("");
-  const [htmlMode, setHtmlMode]             = useState("preview"); // "preview" | "edit"
-  const [htmlLoading, setHtmlLoading]       = useState(false);
+  // ── HTML from transcript ────────────────────────────
+  const [generatedHtml, setGeneratedHtml] = useState("");
+  const [htmlMode, setHtmlMode]           = useState("preview");
+  const [htmlLoading, setHtmlLoading]     = useState(false);
 
-  // ── Overlap detection ───────────────────────────────────
-  const [overlaps, setOverlaps]             = useState([]);
+  // ── Overlap detection ───────────────────────────────
+  const [overlaps, setOverlaps]               = useState([]);
   const [showOverlapModal, setShowOverlapModal] = useState(false);
-  const [overlapLoading, setOverlapLoading] = useState(false);
+  const [overlapLoading, setOverlapLoading]   = useState(false);
 
-  // ── Documentation refinement ────────────────────────────
-
-  const [previewText, setPreviewText] = useState("");
+  // ── Documentation refinement ────────────────────────
+  const [previewText, setPreviewText]         = useState("");
   const [refinementPrompt, setRefinementPrompt] = useState("");
-  const [refineLoading, setRefineLoading] = useState(false);
+  const [refineLoading, setRefineLoading]     = useState(false);
 
   const codeDocRef = useRef(null);
 
-  // ────────────────────────────────────────────────────────
   // 1. Upload video → transcript
-  // ────────────────────────────────────────────────────────
   const uploadVideo = async () => {
     if (!videoFile) { alert("Please select a video file first"); return; }
-
     setVideoLoading(true);
     setTranscript("");
     setGeneratedHtml("");
-
     const formData = new FormData();
     formData.append("video", videoFile);
-
     try {
       const res  = await fetch(`${API}/video-to-text`, { method: "POST", body: formData });
       const data = await res.json();
-
       if (!res.ok) throw new Error(data.error);
-
       setTranscript(data.transcript);
-
-      // Keep a list of all transcripts for overlap detection
       setTranscriptList(prev => [
         ...prev,
         { id: Date.now(), title: videoTitle || videoFile.name, text: data.transcript },
@@ -80,16 +235,12 @@ export default function App() {
     }
   };
 
-  // ────────────────────────────────────────────────────────
   // 2. Transcript → HTML
-  // ────────────────────────────────────────────────────────
   const generateHtml = async () => {
     if (!transcript.trim()) { alert("Transcribe a video first"); return; }
-
     setHtmlLoading(true);
     setGeneratedHtml("");
     setHtmlMode("preview");
-
     try {
       const res  = await fetch(`${API}/transcript-to-html`, {
         method: "POST",
@@ -106,18 +257,14 @@ export default function App() {
     }
   };
 
-  // ────────────────────────────────────────────────────────
   // 3. Send HTML → CodeDoc input
-  // ────────────────────────────────────────────────────────
   const sendToCodeDoc = () => {
     setCode(generatedHtml);
     setTitle(videoTitle || title);
     codeDocRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  // ────────────────────────────────────────────────────────
   // 4. Generate documentation
-  // ────────────────────────────────────────────────────────
   const generateDoc = async () => {
     if (!code.trim()) {
       setStatus({ type: "error", message: "⚠ Paste or generate HTML code first" });
@@ -128,10 +275,8 @@ export default function App() {
       setStatus({ type: "error", message: "⚠ Please provide valid HTML (no tags detected)" });
       return;
     }
-
     setLoading(true);
     setStatus({ type: "loading", message: "⏳ Analysing HTML and generating docs…" });
-
     try {
       const res  = await fetch(`${API}/generate-doc`, {
         method: "POST",
@@ -142,7 +287,6 @@ export default function App() {
       if (!res.ok) throw new Error(data.error);
       setPreview(data.result);
       setPreviewText(data.result);
-      setPreviewEditMode(false);
       setStatus({ type: "success", message: "✅ Documentation generated!" });
     } catch (err) {
       setStatus({ type: "error", message: "❌ " + err.message });
@@ -151,26 +295,16 @@ export default function App() {
     }
   };
 
-  // ────────────────────────────────────────────────────────
-  // 4.5. Refine documentation with Gemini
-  // ────────────────────────────────────────────────────────
+  // 4.5. Refine documentation
   const refineDoc = async () => {
     if (!previewText) { alert("No documentation to refine"); return; }
-    
     setRefineLoading(true);
-    setStatus({ type: "loading", message: "⏳ Refining documentation with Gemini…" });
-
+    setStatus({ type: "loading", message: "⏳ Refining documentation…" });
     try {
       const res = await fetch(`${API}/refine-doc`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          markdown: previewText, 
-          refinement: refinementPrompt,
-          code,
-          style,
-          title
-        }),
+        body: JSON.stringify({ markdown: previewText, refinement: refinementPrompt, code, style, title }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -185,9 +319,7 @@ export default function App() {
     }
   };
 
-  // ────────────────────────────────────────────────────────
-  // 5. Download as .docx
-  // ────────────────────────────────────────────────────────
+  // 5. Download .docx
   const downloadDocx = async () => {
     if (!preview) { alert("Generate documentation first"); return; }
     try {
@@ -209,23 +341,29 @@ export default function App() {
     }
   };
 
-  // ────────────────────────────────────────────────────────
-  // 6. Download as .md
-  // ────────────────────────────────────────────────────────
-  const downloadMd = () => {
+  // 6. Download .pdf
+  const downloadPdf = async () => {
     if (!preview) { alert("Generate documentation first"); return; }
-    const blob = new Blob([preview], { type: "text/markdown" });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement("a");
-    a.href     = url;
-    a.download = `${(title || "documentation").replace(/\s+/g, "_")}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      const res = await fetch(`${API}/download-pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ markdown: preview, title }),
+      });
+      if (!res.ok) throw new Error("Server error");
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = `${(title || "documentation").replace(/\s+/g, "_")}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert("PDF download failed: " + err.message);
+    }
   };
 
-  // ────────────────────────────────────────────────────────
-  // 7. Detect topic overlaps
-  // ────────────────────────────────────────────────────────
+  // 7. Detect overlaps
   const detectOverlaps = async () => {
     if (transcriptList.length < 2) {
       alert("Upload at least 2 videos to detect overlapping topics");
@@ -240,7 +378,6 @@ export default function App() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-
       if (data.overlaps.length === 0) {
         alert("No overlapping topics found between the uploaded videos.");
       } else {
@@ -254,7 +391,6 @@ export default function App() {
     }
   };
 
-  // Append an excerpt from the overlap modal into the code editor
   const handleOverlapSelect = (excerpt) => {
     if (excerpt) {
       setCode(prev =>
@@ -266,9 +402,7 @@ export default function App() {
     setShowOverlapModal(false);
   };
 
-  // ────────────────────────────────────────────────────────
-  // Render
-  // ────────────────────────────────────────────────────────
+  /* ── render ── */
   return (
     <div className="app">
       <header className="app-header">
@@ -276,7 +410,7 @@ export default function App() {
         <p className="app-subtitle">Transcribe videos → generate HTML → produce documentation</p>
       </header>
 
-      {/* ── STEP 1 · VIDEO → TRANSCRIPT ──────────────────── */}
+      {/* STEP 01 · VIDEO → TRANSCRIPT */}
       <section className="card">
         <div className="card-title">
           <span className="step-badge">01</span>
@@ -311,7 +445,9 @@ export default function App() {
           <div className="transcript-area">
             <div className="area-label">
               📝 Transcript
-              <span className="badge-count">{transcriptList.length} video{transcriptList.length !== 1 ? "s" : ""} loaded</span>
+              <span className="badge-count">
+                {transcriptList.length} video{transcriptList.length !== 1 ? "s" : ""} loaded
+              </span>
             </div>
             <textarea
               className="mono-textarea"
@@ -321,11 +457,15 @@ export default function App() {
             />
             <div className="transcript-actions">
               <button className="btn btn-secondary" onClick={generateHtml} disabled={htmlLoading}>
-                {htmlLoading ? <><span className="spinner" /> Generating HTML…</> : "⚙️ Generate HTML from Transcript"}
+                {htmlLoading
+                  ? <><span className="spinner" /> Generating HTML…</>
+                  : "⚙️ Generate HTML from Transcript"}
               </button>
               {transcriptList.length >= 2 && (
                 <button className="btn btn-warn" onClick={detectOverlaps} disabled={overlapLoading}>
-                  {overlapLoading ? <><span className="spinner" /> Detecting…</> : `🔍 Detect Overlaps (${transcriptList.length} videos)`}
+                  {overlapLoading
+                    ? <><span className="spinner" /> Detecting…</>
+                    : `🔍 Detect Overlaps (${transcriptList.length} videos)`}
                 </button>
               )}
             </div>
@@ -333,7 +473,7 @@ export default function App() {
         )}
       </section>
 
-      {/* ── STEP 2 · HTML PREVIEW + EDIT ─────────────────── */}
+      {/* STEP 02 · HTML PREVIEW + EDIT */}
       {generatedHtml && (
         <section className="card">
           <div className="card-title">
@@ -373,7 +513,7 @@ export default function App() {
         </section>
       )}
 
-      {/* ── STEP 3 · CODE DOC GENERATOR ──────────────────── */}
+      {/* STEP 03 · DOC GENERATOR */}
       <section className="card" ref={codeDocRef}>
         <div className="card-title">
           <span className="step-badge">03</span>
@@ -385,8 +525,8 @@ export default function App() {
         <PromptBox prompt={prompt} setPrompt={setPrompt} />
         <GenerateButton loading={loading} generateDoc={generateDoc} />
         <Status status={status} />
-        <Preview 
-          preview={preview} 
+        <Preview
+          preview={preview}
           previewText={previewText}
           setPreviewText={setPreviewText}
           refinementPrompt={refinementPrompt}
@@ -400,14 +540,14 @@ export default function App() {
             <button className="btn btn-docx" onClick={downloadDocx}>
               📄 Download Word (.docx)
             </button>
-            <button className="btn btn-md" onClick={downloadMd}>
-              📥 Download Markdown (.md)
+            <button className="btn btn-pdf" onClick={downloadPdf}>
+              📕 Download PDF (.pdf)
             </button>
           </div>
         )}
       </section>
 
-      {/* ── OVERLAP MODAL ─────────────────────────────────── */}
+      {/* OVERLAP MODAL */}
       {showOverlapModal && (
         <OverlapModal
           overlaps={overlaps}
