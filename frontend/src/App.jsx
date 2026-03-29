@@ -4,7 +4,7 @@ import LandingPage from "./LandingPage";
 import SavedDocuments from "./SavedDocuments";
 import "./App.css";
 
-const API = "http://localhost:5000";
+const API = "https://smartmeet-2.onrender.com";
 
 /* ─── Step Progress Bar ───────────────────────────────────────────────── */
 
