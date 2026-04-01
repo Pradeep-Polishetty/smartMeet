@@ -5,6 +5,7 @@ import "./SavedDocuments.css";
 export default function SavedDocuments({
   onClose,
   onSelectDocument,
+  apiUrl = "https://smartmeet-2.onrender.com",
 }) {
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
@@ -23,7 +24,7 @@ export default function SavedDocuments({
   const fetchProjects = async () => {
     setLoading(true);
     try {
-      const response = await fetch("http://localhost:5000/projects");
+      const response = await fetch(`${apiUrl}/projects`);
       const data = await response.json();
       setProjects(data.projects || []);
     } catch (err) {
@@ -39,14 +40,14 @@ export default function SavedDocuments({
     try {
       // Fetch documents for this project
       const docsResponse = await fetch(
-        `http://localhost:5000/documents/${projectName}`
+        `${apiUrl}/documents/${projectName}`
       );
       const docsData = await docsResponse.json();
       setProjectDocuments(docsData.documents || []);
 
       // Fetch sessions for this project
       const sessionsResponse = await fetch(
-        `http://localhost:5000/project-sessions/${projectName}`
+        `${apiUrl}/project-sessions/${projectName}`
       );
       const sessionsData = await sessionsResponse.json();
       setSessions(sessionsData.sessions || []);
@@ -63,7 +64,7 @@ export default function SavedDocuments({
 
     try {
       const response = await fetch(
-        `http://localhost:5000/document/${documentId}`,
+        `${apiUrl}/document/${documentId}`,
         { method: "DELETE" }
       );
       if (response.ok) {
@@ -81,7 +82,7 @@ export default function SavedDocuments({
   const handleDownloadPDF = async (documentId, documentTitle) => {
     try {
       const response = await fetch(
-        `http://localhost:5000/download-pdf-from-db/${documentId}`
+        `${apiUrl}/download-pdf-from-db/${documentId}`
       );
       if (!response.ok) throw new Error("Failed to download PDF");
 
@@ -101,7 +102,7 @@ export default function SavedDocuments({
   const handleDownloadMarkdown = async (documentId, documentTitle) => {
     try {
       const response = await fetch(
-        `http://localhost:5000/download-markdown-from-db/${documentId}`
+        `${apiUrl}/download-markdown-from-db/${documentId}`
       );
       if (!response.ok) throw new Error("Failed to download markdown");
 
@@ -120,7 +121,7 @@ export default function SavedDocuments({
 
   const handleViewDocument = async (documentId) => {
     try {
-      const res = await fetch(`http://localhost:5000/document/${documentId}`);
+      const res = await fetch(`${apiUrl}/document/${documentId}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       

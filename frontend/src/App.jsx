@@ -846,6 +846,7 @@ export default function App() {
         <SavedDocuments
           onClose={() => setShowSavedDocuments(false)}
           onSelectDocument={loadSavedDocument}
+          apiUrl={API}
         />
       )}
 
