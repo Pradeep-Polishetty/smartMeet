@@ -779,7 +779,7 @@ app.get("/documents/:projectName", async (req, res) => {
   try {
     const documents = await DBDocument.find({ projectName }).sort({ createdAt: -1 });
     const project = await Project.findOne({ projectName });
-
+    console.log(`📄 Fetched ${documents.length} documents for project: ${projectName}`);
     res.json({ 
       projectName,
       documentCount: documents.length,
